@@ -185,15 +185,19 @@ val date = o.optString("date", "")
 val pts = o.optString("points", "0")
 val cardId = o.optInt("card_id", 0)
 val createdAt = o.optString("created_at", "")
-val entryType = o.optString("entry_type", "EXPENSE")
-if (id == -1) {
-dbHelper.insertExpense(name, price, cId, tIds, date, pts, cardId, entryType)
-} else {
-dbHelper.updateExpense(id, name, price, cId, tIds, date, pts, cardId, createdAt, entryType)
-id.toLong()
-}
-} catch (e: Exception) { e.printStackTrace(); -1L }
-}
+            val entryType = o.optString("entry_type", "EXPENSE")
+            val taxRate = o.optInt("tax_rate", 0)
+            val invoiceFlag = o.optInt("invoice_flag", 0)
+            val settlementStatus = o.optString("settlement_status", "PAID")
+            val dueDate = o.optString("due_date", "")
+            if (id == -1) {
+                dbHelper.insertExpense(name, price, cId, tIds, date, pts, cardId, entryType, taxRate, invoiceFlag, settlementStatus, dueDate)
+            } else {
+                dbHelper.updateExpense(id, name, price, cId, tIds, date, pts, cardId, createdAt, entryType, taxRate, invoiceFlag, settlementStatus, dueDate)
+                id.toLong()
+            }
+        } catch (e: Exception) { e.printStackTrace(); -1L }
+    }
 
 // ===== 定型入力テンプレート (v35) =====
 @JavascriptInterface fun getInputTemplates(): String = dbHelper.getInputTemplates()
@@ -317,9 +321,23 @@ dbHelper.changeFixedCostHistory(id, name, amount, categoryId, validFrom)
 fun getAccountInfo(): String {
 val arr = JSONArray()
 for (i in 1..3) {
+val isBiz = if (i == currentAccount) {
+dbHelper.getSetting("bizMode", "false") == "true"
+} else {
+val otherDbName = if (i == 1) "KakeiboDB" else "KakeiboDB_$i"
+var res = false
+val tempDb = DatabaseHelper(this@MainActivity, otherDbName)
+try {
+res = tempDb.getSetting("bizMode", "false") == "true"
+} finally {
+tempDb.close()
+}
+res
+}
 arr.put(JSONObject().apply {
-put("id",   i)
-put("name", prefs.getString("$KEY_ACCT_NAME$i", DEFAULT_NAMES[i - 1]) ?: DEFAULT_NAMES[i - 1])
+put("id",    i)
+put("name",  prefs.getString("$KEY_ACCT_NAME$i", DEFAULT_NAMES[i - 1]) ?: DEFAULT_NAMES[i - 1])
+put("isBiz", isBiz)
 })
 }
 return JSONObject().apply {
@@ -418,6 +436,21 @@ fun getCostTagStats(filterJson: String): String = dbHelper.getCostTagStats(filte
 
 @JavascriptInterface
 fun getEarliestExpenseDate(): String = dbHelper.getEarliestExpenseDate()
+
+// ===== v36: 売上管理モード専用 API =====
+@JavascriptInterface fun ensureDefaultCostTag(): Int = dbHelper.ensureDefaultCostTag()
+@JavascriptInterface fun getBizCashflowByRange(dateFrom: String, dateTo: String): String = dbHelper.getBizCashflowByRange(dateFrom, dateTo)
+@JavascriptInterface fun getBizCalendarMonthSummary(ym: String, filterJson: String): String = dbHelper.getBizCalendarMonthSummary(ym, filterJson)
+@JavascriptInterface fun getMemoSuggestions(prefix: String, limit: Int): String = dbHelper.getMemoSuggestions(prefix, limit)
+@JavascriptInterface fun markAsSettled(id: Int): Int = dbHelper.markAsSettled(id)
+@JavascriptInterface fun markManyAsSettled(idsJson: String): Int {
+return try {
+val arr = JSONArray(idsJson)
+dbHelper.markManyAsSettled(IntArray(arr.length()) { i -> arr.getInt(i) })
+} catch (e: Exception) { 0 }
+}
+@JavascriptInterface fun getUnpaidSummary(): String = dbHelper.getUnpaidSummary()
+@JavascriptInterface fun getAnnualTaxReport(year: Int): String = dbHelper.getAnnualTaxReport(year)
 
 // ===== システム =====
 @JavascriptInterface fun exitApp() { runOnUiThread { finish() } }

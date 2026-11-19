@@ -18,24 +18,25 @@ import java.io.File
 // =========================================================
 
 class DatabaseHelper(private val context: Context, dbName: String = "KakeiboDB")
-: SQLiteOpenHelper(context, dbName, null, 35) {
+    : SQLiteOpenHelper(context, dbName, null, 36) {
 
-// ----------------------------------------------------------
-//  テーブル定義
-// ----------------------------------------------------------
-override fun onCreate(db: SQLiteDatabase) {
-createAllTables(db)
-insertInitialData(db)
-}
+    // ----------------------------------------------------------
+    //  テーブル定義
+    // ----------------------------------------------------------
+    override fun onCreate(db: SQLiteDatabase) {
+        createAllTables(db)
+        insertInitialData(db)
+    }
 
-override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-// ★ 破壊的 DROP は行わない。差分 ALTER / CREATE のみ。
-if (oldVersion < 31) upgradeTo31(db)
-if (oldVersion < 32) upgradeTo32(db)
-if (oldVersion < 33) upgradeTo33(db)
-if (oldVersion < 34) upgradeTo34(db)
-if (oldVersion < 35) upgradeTo35(db)
-}
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        // ★ 破壊的 DROP は行わない。差分 ALTER / CREATE のみ。
+        if (oldVersion < 31) upgradeTo31(db)
+        if (oldVersion < 32) upgradeTo32(db)
+        if (oldVersion < 33) upgradeTo33(db)
+        if (oldVersion < 34) upgradeTo34(db)
+        if (oldVersion < 35) upgradeTo35(db)
+        if (oldVersion < 36) upgradeTo36(db)
+    }
 
 private fun createAllTables(db: SQLiteDatabase) {
 // マスターテーブル
@@ -47,23 +48,27 @@ db.execSQL("CREATE TABLE IF NOT EXISTS cost_tags (id INTEGER PRIMARY KEY AUTOINC
 db.execSQL("DELETE FROM sqlite_sequence WHERE name = 'cost_tags'")
 db.execSQL("INSERT OR IGNORE INTO sqlite_sequence (name, seq) VALUES ('cost_tags', 9999)")
 
-// 支出テーブル（tag_ids は後方互換のため残す）
-db.execSQL("""
-CREATE TABLE IF NOT EXISTS expenses (
-id          INTEGER PRIMARY KEY AUTOINCREMENT,
-name        TEXT,
-price       INTEGER,
-category_id INTEGER,
-tag_ids     TEXT,
-date        TEXT,
-points      INTEGER DEFAULT 0,
-card_id     INTEGER DEFAULT 0,
-entry_type  TEXT NOT NULL DEFAULT 'EXPENSE',
-created_at  DATETIME DEFAULT (datetime('now','localtime')),
-updated_at  DATETIME,
-restored_at DATETIME
-)
-""")
+        // 支出テーブル（tag_ids は後方互換のため残す）
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS expenses (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                name              TEXT,
+                price             INTEGER,
+                category_id       INTEGER,
+                tag_ids           TEXT,
+                date              TEXT,
+                points            INTEGER DEFAULT 0,
+                card_id           INTEGER DEFAULT 0,
+                entry_type        TEXT NOT NULL DEFAULT 'EXPENSE',
+                tax_rate          INTEGER NOT NULL DEFAULT 0,
+                invoice_flag      INTEGER NOT NULL DEFAULT 0,
+                settlement_status TEXT NOT NULL DEFAULT 'PAID',
+                due_date          TEXT NOT NULL DEFAULT '',
+                created_at        DATETIME DEFAULT (datetime('now','localtime')),
+                updated_at        DATETIME,
+                restored_at       DATETIME
+            )
+        """)
 
 // タグ正規化テーブル（v31 新規）
 db.execSQL("""
@@ -131,22 +136,26 @@ created_at  DATETIME DEFAULT (datetime('now','localtime'))
 )
 """)
 
-// ── v35 新規テーブル ──
-db.execSQL("""
-CREATE TABLE IF NOT EXISTS input_templates (
-id          INTEGER PRIMARY KEY AUTOINCREMENT,
-title       TEXT NOT NULL,
-name        TEXT DEFAULT '',
-price       INTEGER NOT NULL DEFAULT 0,
-category_id INTEGER DEFAULT 0,
-tag_ids     TEXT DEFAULT '',
-card_id     INTEGER DEFAULT 0,
-points      INTEGER DEFAULT 0,
-entry_type  TEXT NOT NULL DEFAULT 'EXPENSE',
-sort_order  INTEGER DEFAULT 0,
-created_at  DATETIME DEFAULT (datetime('now','localtime'))
-)
-""")
+        // ── v35 / v36 新規テーブル ──
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS input_templates (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                title             TEXT NOT NULL,
+                name              TEXT DEFAULT '',
+                price             INTEGER NOT NULL DEFAULT 0,
+                category_id       INTEGER DEFAULT 0,
+                tag_ids           TEXT DEFAULT '',
+                card_id           INTEGER DEFAULT 0,
+                points            INTEGER DEFAULT 0,
+                entry_type        TEXT NOT NULL DEFAULT 'EXPENSE',
+                tax_rate          INTEGER NOT NULL DEFAULT 0,
+                invoice_flag      INTEGER NOT NULL DEFAULT 0,
+                settlement_status TEXT NOT NULL DEFAULT 'PAID',
+                due_date          TEXT NOT NULL DEFAULT '',
+                sort_order        INTEGER DEFAULT 0,
+                created_at        DATETIME DEFAULT (datetime('now','localtime'))
+            )
+        """)
 db.execSQL("""
 CREATE TABLE IF NOT EXISTS category_budgets (
 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -289,8 +298,35 @@ created_at  DATETIME DEFAULT (datetime('now','localtime')),
 UNIQUE(period_from, category_id)
 )
 """)
-ensureDefaultIncomeCategories(db)
-}
+        ensureDefaultIncomeCategories(db)
+    }
+
+    private fun upgradeTo36(db: SQLiteDatabase) {
+        if (!hasColumn(db, "expenses", "tax_rate")) {
+            db.execSQL("ALTER TABLE expenses ADD COLUMN tax_rate INTEGER NOT NULL DEFAULT 0")
+        }
+        if (!hasColumn(db, "expenses", "invoice_flag")) {
+            db.execSQL("ALTER TABLE expenses ADD COLUMN invoice_flag INTEGER NOT NULL DEFAULT 0")
+        }
+        if (!hasColumn(db, "expenses", "settlement_status")) {
+            db.execSQL("ALTER TABLE expenses ADD COLUMN settlement_status TEXT NOT NULL DEFAULT 'PAID'")
+        }
+        if (!hasColumn(db, "expenses", "due_date")) {
+            db.execSQL("ALTER TABLE expenses ADD COLUMN due_date TEXT NOT NULL DEFAULT ''")
+        }
+        if (!hasColumn(db, "input_templates", "tax_rate")) {
+            db.execSQL("ALTER TABLE input_templates ADD COLUMN tax_rate INTEGER NOT NULL DEFAULT 0")
+        }
+        if (!hasColumn(db, "input_templates", "invoice_flag")) {
+            db.execSQL("ALTER TABLE input_templates ADD COLUMN invoice_flag INTEGER NOT NULL DEFAULT 0")
+        }
+        if (!hasColumn(db, "input_templates", "settlement_status")) {
+            db.execSQL("ALTER TABLE input_templates ADD COLUMN settlement_status TEXT NOT NULL DEFAULT 'PAID'")
+        }
+        if (!hasColumn(db, "input_templates", "due_date")) {
+            db.execSQL("ALTER TABLE input_templates ADD COLUMN due_date TEXT NOT NULL DEFAULT ''")
+        }
+    }
 
 private fun upgradeTo31(db: SQLiteDatabase) {
 // 新テーブルを追加（既存テーブルには一切触れない）
@@ -637,66 +673,116 @@ put("cat_type", safeType)
 }, "id=?", arrayOf(id.toString()))
 }
 
-// ----------------------------------------------------------
-//  支出 CRUD
-// ----------------------------------------------------------
-fun insertExpense(
-n: String?,
-p: Any,
-categoryId: Any,
-tIds: String?,
-d: String?,
-pts: Any,
-cardId: Any,
-entryType: String = "EXPENSE"
-): Long {
-val db = writableDatabase
-val safeType = if (entryType == "INCOME") "INCOME" else "EXPENSE"
-val cv = ContentValues().apply {
-put("name",        n ?: "")
-put("price",       p.toString().toIntOrNull() ?: 0)
-put("category_id", categoryId.toString().toIntOrNull() ?: 0)
-put("tag_ids",     tIds ?: "")
-put("date",        d ?: "")
-put("points",      if (safeType == "INCOME") 0 else (pts.toString().toIntOrNull() ?: 0))
-put("card_id",     if (safeType == "INCOME") 0 else (cardId.toString().toIntOrNull() ?: 0))
-put("entry_type",  safeType)
-}
-val newId = db.insert("expenses", null, cv)
-if (newId > 0) syncExpenseTags(db, newId.toInt(), tIds)
-return newId
-}
+    // ----------------------------------------------------------
+    //  支出 CRUD
+    // ----------------------------------------------------------
+    fun insertExpense(
+        n: String?,
+        p: Any,
+        categoryId: Any,
+        tIds: String?,
+        d: String?,
+        pts: Any,
+        cardId: Any,
+        entryType: String = "EXPENSE",
+        taxRate: Int = 0,
+        invoiceFlag: Int = 0,
+        settlementStatus: String = "PAID",
+        dueDate: String = ""
+    ): Long {
+        val db = writableDatabase
+        val safeType = if (entryType == "INCOME") "INCOME" else "EXPENSE"
+        val safeTax = if (taxRate == 10 || taxRate == 8) taxRate else 0
+        val safeInv = if (invoiceFlag == 1) 1 else 0
+        val safeStatus = if (safeType == "EXPENSE" && settlementStatus == "UNPAID") "UNPAID" else "PAID"
+        val safeDue = if (safeStatus == "UNPAID") dueDate.trim() else ""
+        val cv = ContentValues().apply {
+            put("name",              n ?: "")
+            put("price",             p.toString().toIntOrNull() ?: 0)
+            put("category_id",       categoryId.toString().toIntOrNull() ?: 0)
+            put("tag_ids",           tIds ?: "")
+            put("date",              d ?: "")
+            put("points",            if (safeType == "INCOME") 0 else (pts.toString().toIntOrNull() ?: 0))
+            put("card_id",           if (safeType == "INCOME") 0 else (cardId.toString().toIntOrNull() ?: 0))
+            put("entry_type",        safeType)
+            put("tax_rate",          safeTax)
+            put("invoice_flag",      safeInv)
+            put("settlement_status", safeStatus)
+            put("due_date",          safeDue)
+        }
+        val newId = db.insert("expenses", null, cv)
+        if (newId > 0) syncExpenseTags(db, newId.toInt(), tIds)
+        return newId
+    }
 
-fun updateExpense(
-id: Int,
-n: String?,
-p: Any,
-categoryId: Any,
-tIds: String?,
-d: String?,
-pts: Any,
-cardId: Any,
-createdAt: String?,
-entryType: String = "EXPENSE"
-) {
-val db = writableDatabase
-val now = localNow(db)
-val safeType = if (entryType == "INCOME") "INCOME" else "EXPENSE"
-val cv = ContentValues().apply {
-put("name",        n ?: "")
-put("price",       p.toString().toIntOrNull() ?: 0)
-put("category_id", categoryId.toString().toIntOrNull() ?: 0)
-put("tag_ids",     tIds ?: "")
-put("date",        d ?: "")
-put("points",      if (safeType == "INCOME") 0 else (pts.toString().toIntOrNull() ?: 0))
-put("card_id",     if (safeType == "INCOME") 0 else (cardId.toString().toIntOrNull() ?: 0))
-put("entry_type",  safeType)
-if (!createdAt.isNullOrEmpty()) put("created_at", createdAt)
-put("updated_at", now)
-}
-db.update("expenses", cv, "id=?", arrayOf(id.toString()))
-syncExpenseTags(db, id, tIds)
-}
+    fun updateExpense(
+        id: Int,
+        n: String?,
+        p: Any,
+        categoryId: Any,
+        tIds: String?,
+        d: String?,
+        pts: Any,
+        cardId: Any,
+        createdAt: String?,
+        entryType: String = "EXPENSE",
+        taxRate: Int = 0,
+        invoiceFlag: Int = 0,
+        settlementStatus: String = "PAID",
+        dueDate: String = ""
+    ) {
+        val db = writableDatabase
+        val now = localNow(db)
+        val safeType = if (entryType == "INCOME") "INCOME" else "EXPENSE"
+        val safeTax = if (taxRate == 10 || taxRate == 8) taxRate else 0
+        val safeInv = if (invoiceFlag == 1) 1 else 0
+        val safeStatus = if (safeType == "EXPENSE" && settlementStatus == "UNPAID") "UNPAID" else "PAID"
+        val safeDue = if (safeStatus == "UNPAID") dueDate.trim() else ""
+        val cv = ContentValues().apply {
+            put("name",              n ?: "")
+            put("price",             p.toString().toIntOrNull() ?: 0)
+            put("category_id",       categoryId.toString().toIntOrNull() ?: 0)
+            put("tag_ids",           tIds ?: "")
+            put("date",              d ?: "")
+            put("points",            if (safeType == "INCOME") 0 else (pts.toString().toIntOrNull() ?: 0))
+            put("card_id",           if (safeType == "INCOME") 0 else (cardId.toString().toIntOrNull() ?: 0))
+            put("entry_type",        safeType)
+            put("tax_rate",          safeTax)
+            put("invoice_flag",      safeInv)
+            put("settlement_status", safeStatus)
+            put("due_date",          safeDue)
+            if (!createdAt.isNullOrEmpty()) put("created_at", createdAt)
+            put("updated_at", now)
+        }
+        db.update("expenses", cv, "id=?", arrayOf(id.toString()))
+        syncExpenseTags(db, id, tIds)
+    }
+
+    fun ensureDefaultCostTag(): Int {
+        val db = writableDatabase
+        val cur = db.rawQuery("SELECT id FROM cost_tags WHERE name='雑費' ORDER BY id ASC LIMIT 1", null)
+        if (cur.moveToFirst()) {
+            val id = cur.getInt(0)
+            cur.close()
+            return id
+        }
+        cur.close()
+        val anyCur = db.rawQuery("SELECT id FROM cost_tags ORDER BY id ASC LIMIT 1", null)
+        if (anyCur.moveToFirst()) {
+            val id = anyCur.getInt(0)
+            anyCur.close()
+            return id
+        }
+        anyCur.close()
+        val seqCur = db.rawQuery("SELECT COALESCE(seq, 9999) FROM sqlite_sequence WHERE name='cost_tags'", null)
+        val seqVal = if (seqCur.moveToFirst()) seqCur.getInt(0) else 0
+        seqCur.close()
+        if (seqVal < 9999) {
+            db.execSQL("DELETE FROM sqlite_sequence WHERE name = 'cost_tags'")
+            db.execSQL("INSERT INTO sqlite_sequence (name, seq) VALUES ('cost_tags', 9999)")
+        }
+        return db.insert("cost_tags", null, ContentValues().apply { put("name", "雑費") }).toInt()
+    }
 
 /** expense_tags を tag_ids と同期 */
 private fun syncExpenseTags(db: SQLiteDatabase, expenseId: Int, tIds: String?) {
@@ -753,215 +839,294 @@ val isDelete = f.optBoolean("isDeleteHistory", false)
 return if (isDelete) searchDeletedRecords(f, offset) else searchExpenses(f, offset)
 }
 
-private fun buildExpenseSearchWhere(f: JSONObject, args: MutableList<String>): String {
-val where = mutableListOf<String>()
+    private fun buildExpenseSearchWhere(f: JSONObject, args: MutableList<String>): String {
+        val where = mutableListOf<String>()
 
-// 種別フィルタ (ALL | EXPENSE | INCOME)
-val entryType = f.optString("entryType", "ALL")
-if (entryType == "EXPENSE" || entryType == "INCOME") {
-where.add("COALESCE(e.entry_type, 'EXPENSE') = ?")
-args.add(entryType)
-}
+        // 種別フィルタ (ALL | EXPENSE | INCOME)
+        val entryType = f.optString("entryType", "ALL")
+        if (entryType == "EXPENSE" || entryType == "INCOME") {
+            where.add("COALESCE(e.entry_type, 'EXPENSE') = ?")
+            args.add(entryType)
+        }
 
-// カテゴリ
-val catIds = f.optJSONArray("categoryIds")
-if (catIds != null && catIds.length() > 0) {
-val ph = (0 until catIds.length()).joinToString(",") { "?" }
-where.add("e.category_id IN ($ph)")
-(0 until catIds.length()).forEach { args.add(catIds.getInt(it).toString()) }
-}
+        // 売上管理モード種別 (ALL | SALE | COST)
+        val bizKind = f.optString("bizKind", "ALL")
+        if (bizKind == "SALE") {
+            where.add("e.card_id NOT IN (SELECT id FROM cost_tags)")
+        } else if (bizKind == "COST") {
+            where.add("e.card_id IN (SELECT id FROM cost_tags)")
+        }
 
-// タグ（expense_tags 経由）
-val tagIds = f.optJSONArray("tagIds")
-if (tagIds != null && tagIds.length() > 0) {
-val ph = (0 until tagIds.length()).joinToString(",") { "?" }
-where.add("EXISTS (SELECT 1 FROM expense_tags et WHERE et.expense_id=e.id AND et.tag_id IN ($ph))")
-(0 until tagIds.length()).forEach { args.add(tagIds.getInt(it).toString()) }
-}
+        // 入金ステータスフィルタ (ALL | PAID | UNPAID)
+        val settlementStatus = f.optString("settlementStatus", "ALL")
+        if (settlementStatus == "UNPAID") {
+            where.add("COALESCE(e.settlement_status, 'PAID') = 'UNPAID'")
+        } else if (settlementStatus == "PAID") {
+            where.add("COALESCE(e.settlement_status, 'PAID') != 'UNPAID'")
+        }
 
-// メモ部分一致
-val memo = f.optString("memo", "")
-if (memo.isNotBlank()) {
-where.add("e.name LIKE ?")
-args.add("%$memo%")
-}
+        // カテゴリ
+        val catIds = f.optJSONArray("categoryIds")
+        if (catIds != null && catIds.length() > 0) {
+            val ph = (0 until catIds.length()).joinToString(",") { "?" }
+            where.add("e.category_id IN ($ph)")
+            (0 until catIds.length()).forEach { args.add(catIds.getInt(it).toString()) }
+        }
 
-// カード
-val cardIds = f.optJSONArray("cardIds")
-if (cardIds != null && cardIds.length() > 0) {
-val ph = (0 until cardIds.length()).joinToString(",") { "?" }
-where.add("e.card_id IN ($ph)")
-(0 until cardIds.length()).forEach { args.add(cardIds.getInt(it).toString()) }
-}
+        // タグ（expense_tags 経由）
+        val tagIds = f.optJSONArray("tagIds")
+        if (tagIds != null && tagIds.length() > 0) {
+            val ph = (0 until tagIds.length()).joinToString(",") { "?" }
+            where.add("EXISTS (SELECT 1 FROM expense_tags et WHERE et.expense_id=e.id AND et.tag_id IN ($ph))")
+            (0 until tagIds.length()).forEach { args.add(tagIds.getInt(it).toString()) }
+        }
 
-// 期間
-val periodClause = buildPeriodClause(f, "e.date", args)
-if (periodClause.isNotEmpty()) where.add(periodClause)
+        // メモ部分一致
+        val memo = f.optString("memo", "")
+        if (memo.isNotBlank()) {
+            where.add("e.name LIKE ?")
+            args.add("%$memo%")
+        }
 
-return if (where.isEmpty()) "" else "WHERE ${where.joinToString(" AND ")}"
-}
+        // カード
+        val cardIds = f.optJSONArray("cardIds")
+        if (cardIds != null && cardIds.length() > 0) {
+            val ph = (0 until cardIds.length()).joinToString(",") { "?" }
+            where.add("e.card_id IN ($ph)")
+            (0 until cardIds.length()).forEach { args.add(cardIds.getInt(it).toString()) }
+        }
 
-private fun searchExpenses(f: JSONObject, offset: Int): String {
-val args = mutableListOf<String>()
-val whereStr = buildExpenseSearchWhere(f, args)
-val orderStr = buildOrderClause(f)
+        // 期間
+        val periodClause = buildPeriodClause(f, "e.date", args)
+        if (periodClause.isNotEmpty()) where.add(periodClause)
 
-val sql = """
-SELECT e.*, c.name as cat_name, COALESCE(pc.name, ct.name) as card_name,
-CASE WHEN ct.id IS NOT NULL THEN 1 ELSE 0 END as is_cost_tag
-FROM expenses e
-LEFT JOIN categories  c  ON e.category_id = c.id
-LEFT JOIN point_cards pc ON e.card_id = pc.id
-LEFT JOIN cost_tags   ct ON e.card_id = ct.id
-$whereStr
-$orderStr
-LIMIT 20 OFFSET ?
-"""
-args.add(offset.toString())
-return buildExpenseList(readableDatabase.rawQuery(sql, args.toTypedArray()))
-}
+        return if (where.isEmpty()) "" else "WHERE ${where.joinToString(" AND ")}"
+    }
 
-fun getSearchSummary(filterJson: String): String {
-val f = JSONObject(filterJson)
-val isDelete = f.optBoolean("isDeleteHistory", false)
-if (isDelete) {
-val cursor = readableDatabase.rawQuery(
-"SELECT original_data FROM action_logs WHERE action_type='DELETE'", null
-)
-val catIds  = f.optJSONArray("categoryIds")?.let { j -> (0 until j.length()).map { j.getInt(it) }.toSet() }
-val tagIds  = f.optJSONArray("tagIds")?.let { j -> (0 until j.length()).map { j.getInt(it) }.toSet() }
-val cardIds = f.optJSONArray("cardIds")?.let { j -> (0 until j.length()).map { j.getInt(it) }.toSet() }
-val memo    = f.optString("memo", "")
-val entryType = f.optString("entryType", "ALL")
-val (dateFrom, dateTo) = buildPeriodRange(f)
-var count = 0
-var totalExp = 0
-var totalInc = 0
-var totalPts = 0
-while (cursor.moveToNext()) {
-val dataObj = runCatching { JSONObject(cursor.getString(0)) }.getOrNull() ?: continue
-val et = dataObj.optString("entry_type", "EXPENSE").ifBlank { "EXPENSE" }
-if ((entryType == "EXPENSE" || entryType == "INCOME") && et != entryType) continue
-if (catIds != null && catIds.isNotEmpty() && !catIds.contains(dataObj.optInt("category_id"))) continue
-if (cardIds != null && cardIds.isNotEmpty() && !cardIds.contains(dataObj.optInt("card_id"))) continue
-if (memo.isNotBlank() && !dataObj.optString("name", "").contains(memo)) continue
-if (tagIds != null && tagIds.isNotEmpty()) {
-val expTags = dataObj.optString("tag_ids", "").split(",").mapNotNull { it.trim().toIntOrNull() }.toSet()
-if (expTags.intersect(tagIds).isEmpty()) continue
-}
-val expDate = dataObj.optString("date", "")
-if (dateFrom.isNotEmpty() && expDate < dateFrom) continue
-if (dateTo.isNotEmpty() && expDate > dateTo) continue
-val price = dataObj.optInt("price", 0)
-if (et == "INCOME") totalInc += price else totalExp += price
-totalPts += dataObj.optInt("points", 0)
-count++
-}
-cursor.close()
-val sumTotal = totalExp + totalInc
-val avg = if (count > 0) (if (entryType == "INCOME") totalInc else if (entryType == "EXPENSE") totalExp else sumTotal) / count else 0
-return JSONObject().apply {
-put("count", count)
-put("totalExpense", totalExp)
-put("totalIncome", totalInc)
-put("netTotal", totalInc - totalExp)
-put("avgPrice", avg)
-put("totalPoints", totalPts)
-}.toString()
-}
+    private fun searchExpenses(f: JSONObject, offset: Int): String {
+        val args = mutableListOf<String>()
+        val whereStr = buildExpenseSearchWhere(f, args)
+        val orderStr = buildOrderClause(f)
 
-val args = mutableListOf<String>()
-val whereStr = buildExpenseSearchWhere(f, args)
-val sql = """
-SELECT
-COUNT(e.id),
-COALESCE(SUM(CASE WHEN COALESCE(e.entry_type,'EXPENSE')='EXPENSE' THEN e.price ELSE 0 END), 0),
-COALESCE(SUM(CASE WHEN e.entry_type='INCOME' THEN e.price ELSE 0 END), 0),
-COALESCE(SUM(e.points), 0)
-FROM expenses e
-$whereStr
-"""
-val cur = readableDatabase.rawQuery(sql, args.toTypedArray())
-var count = 0
-var totalExp = 0
-var totalInc = 0
-var totalPts = 0
-if (cur.moveToFirst()) {
-count = cur.getInt(0)
-totalExp = cur.getInt(1)
-totalInc = cur.getInt(2)
-totalPts = cur.getInt(3)
-}
-cur.close()
-val entryType = f.optString("entryType", "ALL")
-val avg = if (count > 0) (if (entryType == "INCOME") totalInc else if (entryType == "EXPENSE") totalExp else (totalExp + totalInc)) / count else 0
-return JSONObject().apply {
-put("count", count)
-put("totalExpense", totalExp)
-put("totalIncome", totalInc)
-put("netTotal", totalInc - totalExp)
-put("avgPrice", avg)
-put("totalPoints", totalPts)
-}.toString()
-}
+        val sql = """
+            SELECT e.*, c.name as cat_name, COALESCE(pc.name, ct.name) as card_name,
+                   CASE WHEN ct.id IS NOT NULL THEN 1 ELSE 0 END as is_cost_tag
+            FROM expenses e
+            LEFT JOIN categories  c  ON e.category_id = c.id
+            LEFT JOIN point_cards pc ON e.card_id = pc.id
+            LEFT JOIN cost_tags   ct ON e.card_id = ct.id
+            $whereStr
+            $orderStr
+            LIMIT 20 OFFSET ?
+        """
+        args.add(offset.toString())
+        return buildExpenseList(readableDatabase.rawQuery(sql, args.toTypedArray()))
+    }
 
-private fun searchDeletedRecords(f: JSONObject, offset: Int): String {
-// action_logs の original_data (JSON TEXT) に対してフィルタ
-// 簡易実装：全件取得後 JSON パースでフィルタ（削除履歴は通常少ない）
-val list = JSONArray()
-val cursor = readableDatabase.rawQuery(
-"SELECT id, timestamp, original_data FROM action_logs WHERE action_type='DELETE' ORDER BY id DESC",
-null
-)
-val catIds  = f.optJSONArray("categoryIds")?.let { j -> (0 until j.length()).map { j.getInt(it) }.toSet() }
-val tagIds  = f.optJSONArray("tagIds")?.let { j -> (0 until j.length()).map { j.getInt(it) }.toSet() }
-val cardIds = f.optJSONArray("cardIds")?.let { j -> (0 until j.length()).map { j.getInt(it) }.toSet() }
-val memo    = f.optString("memo","")
-val entryType = f.optString("entryType", "ALL")
-val (dateFrom, dateTo) = buildPeriodRange(f)
+    private fun loadCostTagIdSet(): Set<Int> {
+        val set = mutableSetOf<Int>()
+        val c = readableDatabase.rawQuery("SELECT id FROM cost_tags", null)
+        while (c.moveToNext()) set.add(c.getInt(0))
+        c.close()
+        return set
+    }
 
-var matched = 0
-var skipped = 0
-while (cursor.moveToNext()) {
-val logId  = cursor.getInt(0)
-val ts     = cursor.getString(1)
-val dataObj = runCatching { JSONObject(cursor.getString(2)) }.getOrNull() ?: continue
-val et = dataObj.optString("entry_type", "EXPENSE").ifBlank { "EXPENSE" }
-if ((entryType == "EXPENSE" || entryType == "INCOME") && et != entryType) continue
+    fun getSearchSummary(filterJson: String): String {
+        val f = JSONObject(filterJson)
+        val isDelete = f.optBoolean("isDeleteHistory", false)
+        val bizKind = f.optString("bizKind", "ALL")
+        val settlementStatus = f.optString("settlementStatus", "ALL")
+        if (isDelete) {
+            val costTagIds = loadCostTagIdSet()
+            val cursor = readableDatabase.rawQuery(
+                "SELECT original_data FROM action_logs WHERE action_type='DELETE'", null
+            )
+            val catIds  = f.optJSONArray("categoryIds")?.let { j -> (0 until j.length()).map { j.getInt(it) }.toSet() }
+            val tagIds  = f.optJSONArray("tagIds")?.let { j -> (0 until j.length()).map { j.getInt(it) }.toSet() }
+            val cardIds = f.optJSONArray("cardIds")?.let { j -> (0 until j.length()).map { j.getInt(it) }.toSet() }
+            val memo    = f.optString("memo", "")
+            val entryType = f.optString("entryType", "ALL")
+            val (dateFrom, dateTo) = buildPeriodRange(f)
+            var count = 0
+            var totalExp = 0
+            var totalInc = 0
+            var totalPts = 0
+            var totalSales = 0
+            var totalCosts = 0
+            var unpaidSales = 0
+            var unpaidCount = 0
+            while (cursor.moveToNext()) {
+                val dataObj = runCatching { JSONObject(cursor.getString(0)) }.getOrNull() ?: continue
+                val et = dataObj.optString("entry_type", "EXPENSE").ifBlank { "EXPENSE" }
+                if ((entryType == "EXPENSE" || entryType == "INCOME") && et != entryType) continue
+                val cardId = dataObj.optInt("card_id", 0)
+                val isCost = costTagIds.contains(cardId)
+                if (bizKind == "SALE" && isCost) continue
+                if (bizKind == "COST" && !isCost) continue
+                val ss = dataObj.optString("settlement_status", "PAID").ifBlank { "PAID" }
+                if (settlementStatus == "UNPAID" && ss != "UNPAID") continue
+                if (settlementStatus == "PAID" && ss == "UNPAID") continue
+                if (catIds != null && catIds.isNotEmpty() && !catIds.contains(dataObj.optInt("category_id"))) continue
+                if (cardIds != null && cardIds.isNotEmpty() && !cardIds.contains(cardId)) continue
+                if (memo.isNotBlank() && !dataObj.optString("name", "").contains(memo)) continue
+                if (tagIds != null && tagIds.isNotEmpty()) {
+                    val expTags = dataObj.optString("tag_ids", "").split(",").mapNotNull { it.trim().toIntOrNull() }.toSet()
+                    if (expTags.intersect(tagIds).isEmpty()) continue
+                }
+                val expDate = dataObj.optString("date", "")
+                if (dateFrom.isNotEmpty() && expDate < dateFrom) continue
+                if (dateTo.isNotEmpty() && expDate > dateTo) continue
+                val price = dataObj.optInt("price", 0)
+                if (et == "INCOME") {
+                    totalInc += price
+                } else {
+                    totalExp += price
+                    if (isCost) totalCosts += price else {
+                        totalSales += price
+                        if (ss == "UNPAID") {
+                            unpaidSales += price
+                            unpaidCount++
+                        }
+                    }
+                }
+                totalPts += dataObj.optInt("points", 0)
+                count++
+            }
+            cursor.close()
+            val sumTotal = totalExp + totalInc
+            val avg = if (count > 0) (if (entryType == "INCOME") totalInc else if (entryType == "EXPENSE") totalExp else sumTotal) / count else 0
+            return JSONObject().apply {
+                put("count", count)
+                put("totalExpense", totalExp)
+                put("totalIncome", totalInc)
+                put("netTotal", totalInc - totalExp)
+                put("avgPrice", avg)
+                put("totalPoints", totalPts)
+                put("totalSales", totalSales)
+                put("totalCosts", totalCosts)
+                put("netSales", totalSales - totalCosts)
+                put("unpaidSales", unpaidSales)
+                put("unpaidCount", unpaidCount)
+            }.toString()
+        }
 
-// フィルタ判定
-if (catIds != null && catIds.isNotEmpty() && !catIds.contains(dataObj.optInt("category_id"))) continue
-if (cardIds != null && cardIds.isNotEmpty() && !cardIds.contains(dataObj.optInt("card_id"))) continue
-if (memo.isNotBlank() && !dataObj.optString("name","").contains(memo)) continue
-if (tagIds != null && tagIds.isNotEmpty()) {
-val expTags = dataObj.optString("tag_ids","").split(",").mapNotNull { it.trim().toIntOrNull() }.toSet()
-if (expTags.intersect(tagIds).isEmpty()) continue
-}
-val expDate = dataObj.optString("date","")
-if (dateFrom.isNotEmpty() && expDate < dateFrom) continue
-if (dateTo.isNotEmpty() && expDate > dateTo) continue
+        val args = mutableListOf<String>()
+        val whereStr = buildExpenseSearchWhere(f, args)
+        val sql = """
+            SELECT
+                COUNT(e.id),
+                COALESCE(SUM(CASE WHEN COALESCE(e.entry_type,'EXPENSE')='EXPENSE' THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.entry_type='INCOME' THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(e.points), 0),
+                COALESCE(SUM(CASE WHEN COALESCE(e.entry_type,'EXPENSE')='EXPENSE' AND e.card_id NOT IN (SELECT id FROM cost_tags) THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN COALESCE(e.entry_type,'EXPENSE')='EXPENSE' AND e.card_id IN (SELECT id FROM cost_tags) THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN COALESCE(e.entry_type,'EXPENSE')='EXPENSE' AND e.card_id NOT IN (SELECT id FROM cost_tags) AND COALESCE(e.settlement_status,'PAID')='UNPAID' THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN COALESCE(e.entry_type,'EXPENSE')='EXPENSE' AND e.card_id NOT IN (SELECT id FROM cost_tags) AND COALESCE(e.settlement_status,'PAID')='UNPAID' THEN 1 ELSE 0 END), 0)
+            FROM expenses e
+            $whereStr
+        """
+        val cur = readableDatabase.rawQuery(sql, args.toTypedArray())
+        var count = 0
+        var totalExp = 0
+        var totalInc = 0
+        var totalPts = 0
+        var totalSales = 0
+        var totalCosts = 0
+        var unpaidSales = 0
+        var unpaidCount = 0
+        if (cur.moveToFirst()) {
+            count = cur.getInt(0)
+            totalExp = cur.getInt(1)
+            totalInc = cur.getInt(2)
+            totalPts = cur.getInt(3)
+            totalSales = cur.getInt(4)
+            totalCosts = cur.getInt(5)
+            unpaidSales = cur.getInt(6)
+            unpaidCount = cur.getInt(7)
+        }
+        cur.close()
+        val entryType = f.optString("entryType", "ALL")
+        val avg = if (count > 0) (if (entryType == "INCOME") totalInc else if (entryType == "EXPENSE") totalExp else (totalExp + totalInc)) / count else 0
+        return JSONObject().apply {
+            put("count", count)
+            put("totalExpense", totalExp)
+            put("totalIncome", totalInc)
+            put("netTotal", totalInc - totalExp)
+            put("avgPrice", avg)
+            put("totalPoints", totalPts)
+            put("totalSales", totalSales)
+            put("totalCosts", totalCosts)
+            put("netSales", totalSales - totalCosts)
+            put("unpaidSales", unpaidSales)
+            put("unpaidCount", unpaidCount)
+        }.toString()
+    }
 
-// ページング
-if (skipped < offset) { skipped++; continue }
-if (matched >= 20) break
+    private fun searchDeletedRecords(f: JSONObject, offset: Int): String {
+        val costTagIds = loadCostTagIdSet()
+        val list = JSONArray()
+        val cursor = readableDatabase.rawQuery(
+            "SELECT id, timestamp, original_data FROM action_logs WHERE action_type='DELETE' ORDER BY id DESC",
+            null
+        )
+        val catIds  = f.optJSONArray("categoryIds")?.let { j -> (0 until j.length()).map { j.getInt(it) }.toSet() }
+        val tagIds  = f.optJSONArray("tagIds")?.let { j -> (0 until j.length()).map { j.getInt(it) }.toSet() }
+        val cardIds = f.optJSONArray("cardIds")?.let { j -> (0 until j.length()).map { j.getInt(it) }.toSet() }
+        val memo    = f.optString("memo","")
+        val entryType = f.optString("entryType", "ALL")
+        val bizKind = f.optString("bizKind", "ALL")
+        val settlementStatus = f.optString("settlementStatus", "ALL")
+        val (dateFrom, dateTo) = buildPeriodRange(f)
 
-val cardIdVal = dataObj.optInt("card_id")
-val pcName = getMasterName("point_cards", cardIdVal)
-val ctName = if (pcName.isEmpty() && cardIdVal > 0) getMasterName("cost_tags", cardIdVal) else ""
-list.put(JSONObject().apply {
-put("id",        logId)
-put("timestamp", ts)
-put("original",  dataObj)
-put("category",  getMasterName("categories",  dataObj.optInt("category_id")))
-put("card",      pcName.ifEmpty { ctName })
-put("is_cost_tag", if (ctName.isNotEmpty()) 1 else 0)
-put("tags",      resolveTagNames(dataObj.optString("tag_ids")))
-})
-matched++
-}
-cursor.close()
-return list.toString()
-}
+        var matched = 0
+        var skipped = 0
+        while (cursor.moveToNext()) {
+            val logId  = cursor.getInt(0)
+            val ts     = cursor.getString(1)
+            val dataObj = runCatching { JSONObject(cursor.getString(2)) }.getOrNull() ?: continue
+            val et = dataObj.optString("entry_type", "EXPENSE").ifBlank { "EXPENSE" }
+            if ((entryType == "EXPENSE" || entryType == "INCOME") && et != entryType) continue
+
+            val cardIdVal = dataObj.optInt("card_id")
+            val isCost = costTagIds.contains(cardIdVal)
+            if (bizKind == "SALE" && isCost) continue
+            if (bizKind == "COST" && !isCost) continue
+            val ss = dataObj.optString("settlement_status", "PAID").ifBlank { "PAID" }
+            if (settlementStatus == "UNPAID" && ss != "UNPAID") continue
+            if (settlementStatus == "PAID" && ss == "UNPAID") continue
+
+            // フィルタ判定
+            if (catIds != null && catIds.isNotEmpty() && !catIds.contains(dataObj.optInt("category_id"))) continue
+            if (cardIds != null && cardIds.isNotEmpty() && !cardIds.contains(cardIdVal)) continue
+            if (memo.isNotBlank() && !dataObj.optString("name","").contains(memo)) continue
+            if (tagIds != null && tagIds.isNotEmpty()) {
+                val expTags = dataObj.optString("tag_ids","").split(",").mapNotNull { it.trim().toIntOrNull() }.toSet()
+                if (expTags.intersect(tagIds).isEmpty()) continue
+            }
+            val expDate = dataObj.optString("date","")
+            if (dateFrom.isNotEmpty() && expDate < dateFrom) continue
+            if (dateTo.isNotEmpty() && expDate > dateTo) continue
+
+            // ページング
+            if (skipped < offset) { skipped++; continue }
+            if (matched >= 20) break
+
+            val pcName = getMasterName("point_cards", cardIdVal)
+            val ctName = if (pcName.isEmpty() && cardIdVal > 0) getMasterName("cost_tags", cardIdVal) else ""
+            list.put(JSONObject().apply {
+                put("id",        logId)
+                put("timestamp", ts)
+                put("original",  dataObj)
+                put("category",  getMasterName("categories",  dataObj.optInt("category_id")))
+                put("card",      pcName.ifEmpty { ctName })
+                put("is_cost_tag", if (ctName.isNotEmpty()) 1 else 0)
+                put("tags",      resolveTagNames(dataObj.optString("tag_ids")))
+            })
+            matched++
+        }
+        cursor.close()
+        return list.toString()
+    }
 
 private fun buildPeriodClause(f: JSONObject, col: String, args: MutableList<String>): String {
 val preset = f.optString("periodPreset","ALL")
@@ -1106,28 +1271,36 @@ fun restoreLogs(logIds: IntArray) {
 val db = writableDatabase
 db.beginTransaction()
 try {
-logIds.forEach { logId ->
-val cursor = db.rawQuery("SELECT original_data FROM action_logs WHERE id=?", arrayOf(logId.toString()))
-if (cursor.moveToFirst()) {
-val o = JSONObject(cursor.getString(0))
-val et = o.optString("entry_type", "EXPENSE").let { if (it == "INCOME") "INCOME" else "EXPENSE" }
-val newId = db.insert("expenses", null, ContentValues().apply {
-put("name",        o.optString("name"))
-put("price",       o.optInt("price"))
-put("category_id", o.optInt("category_id"))
-put("tag_ids",     o.optString("tag_ids"))
-put("date",        o.optString("date"))
-put("points",      o.optInt("points"))
-put("card_id",     o.optInt("card_id"))
-put("entry_type",  et)
-put("created_at",  o.optString("created_at"))
-put("restored_at", localNow(db))
-})
-if (newId > 0) syncExpenseTags(db, newId.toInt(), o.optString("tag_ids"))
-db.delete("action_logs", "id=?", arrayOf(logId.toString()))
-}
-cursor.close()
-}
+            logIds.forEach { logId ->
+                val cursor = db.rawQuery("SELECT original_data FROM action_logs WHERE id=?", arrayOf(logId.toString()))
+                if (cursor.moveToFirst()) {
+                    val o = JSONObject(cursor.getString(0))
+                    val et = o.optString("entry_type", "EXPENSE").let { if (it == "INCOME") "INCOME" else "EXPENSE" }
+                    val tax = o.opt("tax_rate")?.toString()?.toIntOrNull()?.let { if (it == 10 || it == 8) it else 0 } ?: 0
+                    val inv = o.opt("invoice_flag")?.toString()?.toIntOrNull()?.let { if (it == 1) 1 else 0 } ?: 0
+                    val ss = o.optString("settlement_status", "PAID").let { if (et == "EXPENSE" && it == "UNPAID") "UNPAID" else "PAID" }
+                    val due = o.optString("due_date", "").let { if (it == "null" || ss != "UNPAID") "" else it }
+                    val newId = db.insert("expenses", null, ContentValues().apply {
+                        put("name",              o.optString("name"))
+                        put("price",             o.optInt("price"))
+                        put("category_id",       o.optInt("category_id"))
+                        put("tag_ids",           o.optString("tag_ids"))
+                        put("date",              o.optString("date"))
+                        put("points",            o.optInt("points"))
+                        put("card_id",           o.optInt("card_id"))
+                        put("entry_type",        et)
+                        put("tax_rate",          tax)
+                        put("invoice_flag",      inv)
+                        put("settlement_status", ss)
+                        put("due_date",          due)
+                        put("created_at",        o.optString("created_at"))
+                        put("restored_at",       localNow(db))
+                    })
+                    if (newId > 0) syncExpenseTags(db, newId.toInt(), o.optString("tag_ids"))
+                    db.delete("action_logs", "id=?", arrayOf(logId.toString()))
+                }
+                cursor.close()
+            }
 db.setTransactionSuccessful()
 } finally { db.endTransaction() }
 }
@@ -1208,10 +1381,10 @@ SQLiteDatabase.CONFLICT_REPLACE)
 // ----------------------------------------------------------
 //  エクスポート（JSON）
 // ----------------------------------------------------------
-fun exportAll(accountName: String = ""): String {
-val db   = readableDatabase
-val root = JSONObject()
-root.put("version",      35)
+    fun exportAll(accountName: String = ""): String {
+        val db   = readableDatabase
+        val root = JSONObject()
+        root.put("version",      36)
 root.put("exported_at",  localNow(writableDatabase))
 root.put("account_name", accountName)   // E2: インポート確認用メタ情報
 
@@ -1355,7 +1528,7 @@ db.execSQL("DELETE FROM sqlite_sequence WHERE name = ?", arrayOf(table))
 for (i in 0 until arr.length()) {
 val o = arr.getJSONObject(i)
 // id が文字列でも数値でも安全に取得
-val id = o.opt("id").toString().toIntOrNull() ?: continue
+val id = o.opt("id")?.toString()?.toIntOrNull() ?: continue
 db.insertWithOnConflict(table, null,
 ContentValues().apply {
 put("id",   id)
@@ -1382,27 +1555,35 @@ db.execSQL("INSERT INTO sqlite_sequence (name, seq) VALUES ('cost_tags', ?)", ar
 root.optJSONArray("expenses")?.let { arr ->
 for (i in 0 until arr.length()) {
 val o  = arr.getJSONObject(i)
-val id = o.opt("id").toString().toIntOrNull() ?: continue
+val id = o.opt("id")?.toString()?.toIntOrNull() ?: continue
 // "null" 文字列を空文字に正規化
 fun s(key: String) = o.optString(key).let { if (it == "null") "" else it }
-fun n(key: String) = o.opt(key).toString().toIntOrNull() ?: 0
-val et = s("entry_type").let { if (it == "INCOME") "INCOME" else "EXPENSE" }
-db.insert("expenses", null, ContentValues().apply {
-put("id",          id)
-put("name",        s("name"))
-put("price",       n("price"))
-put("category_id", n("category_id"))
-put("tag_ids",     s("tag_ids"))
-put("date",        s("date"))
-put("points",      n("points"))
-put("card_id",     n("card_id"))
-put("entry_type",  et)
-put("created_at",  s("created_at"))
-put("updated_at",  s("updated_at"))
-val ra = s("restored_at")
-if (ra.isNotEmpty()) put("restored_at", ra)
-})
-syncExpenseTags(db, id, s("tag_ids"))
+fun n(key: String) = o.opt(key)?.toString()?.toIntOrNull() ?: 0
+                    val et = s("entry_type").let { if (it == "INCOME") "INCOME" else "EXPENSE" }
+                    val tax = n("tax_rate").let { if (it == 10 || it == 8) it else 0 }
+                    val inv = if (n("invoice_flag") == 1) 1 else 0
+                    val ss = s("settlement_status").let { if (et == "EXPENSE" && it == "UNPAID") "UNPAID" else "PAID" }
+                    val due = if (ss == "UNPAID") s("due_date") else ""
+                    db.insert("expenses", null, ContentValues().apply {
+                        put("id",                id)
+                        put("name",              s("name"))
+                        put("price",             n("price"))
+                        put("category_id",       n("category_id"))
+                        put("tag_ids",           s("tag_ids"))
+                        put("date",              s("date"))
+                        put("points",            n("points"))
+                        put("card_id",           n("card_id"))
+                        put("entry_type",        et)
+                        put("tax_rate",          tax)
+                        put("invoice_flag",      inv)
+                        put("settlement_status", ss)
+                        put("due_date",          due)
+                        put("created_at",        s("created_at"))
+                        put("updated_at",        s("updated_at"))
+                        val ra = s("restored_at")
+                        if (ra.isNotEmpty()) put("restored_at", ra)
+                    })
+                    syncExpenseTags(db, id, s("tag_ids"))
 }
 }
 
@@ -1410,7 +1591,7 @@ syncExpenseTags(db, id, s("tag_ids"))
 root.optJSONArray("action_logs")?.let { arr ->
 for (i in 0 until arr.length()) {
 val o  = arr.getJSONObject(i)
-val id = o.opt("id").toString().toIntOrNull() ?: continue
+val id = o.opt("id")?.toString()?.toIntOrNull() ?: continue
 db.insert("action_logs", null, ContentValues().apply {
 put("id",            id)
 put("action_type",   o.optString("action_type"))
@@ -1431,7 +1612,7 @@ db.insertWithOnConflict("budget_periods", null,
 ContentValues().apply {
 put("period_from", pf)
 put("period_to",   s("period_to"))
-put("amount",      o.opt("amount").toString().toIntOrNull() ?: 0)
+put("amount",      o.opt("amount")?.toString()?.toIntOrNull() ?: 0)
 put("created_at",  s("created_at"))
 }, SQLiteDatabase.CONFLICT_REPLACE)
 }
@@ -1442,12 +1623,12 @@ root.optJSONArray("budget_extras")?.let { arr ->
 for (i in 0 until arr.length()) {
 val o = arr.getJSONObject(i)
 fun s(k: String) = o.optString(k).let { if (it == "null") "" else it }
-val id = o.opt("id").toString().toIntOrNull() ?: continue
+val id = o.opt("id")?.toString()?.toIntOrNull() ?: continue
 db.insert("budget_extras", null, ContentValues().apply {
 put("id",          id)
 put("period_from", s("period_from"))
 put("name",        s("name"))
-put("amount",      o.opt("amount").toString().toIntOrNull() ?: 0)
+put("amount",      o.opt("amount")?.toString()?.toIntOrNull() ?: 0)
 put("created_at",  s("created_at"))
 })
 }
@@ -1458,13 +1639,13 @@ root.optJSONArray("fixed_costs")?.let { arr ->
 for (i in 0 until arr.length()) {
 val o = arr.getJSONObject(i)
 fun s(k: String) = o.optString(k).let { if (it == "null") "" else it }
-val id = o.opt("id").toString().toIntOrNull() ?: continue
+val id = o.opt("id")?.toString()?.toIntOrNull() ?: continue
 db.insert("fixed_costs", null, ContentValues().apply {
 put("id",          id)
 put("name",        s("name"))
-put("amount",      o.opt("amount").toString().toIntOrNull() ?: 0)
-put("category_id", o.opt("category_id").toString().toIntOrNull() ?: 0)
-put("is_active",   o.opt("is_active").toString().toIntOrNull() ?: 1)
+put("amount",      o.opt("amount")?.toString()?.toIntOrNull() ?: 0)
+put("category_id", o.opt("category_id")?.toString()?.toIntOrNull() ?: 0)
+put("is_active",   o.opt("is_active")?.toString()?.toIntOrNull() ?: 1)
 put("created_at",  s("created_at"))
 })
 }
@@ -1476,13 +1657,13 @@ if (fchArr != null) {
 for (i in 0 until fchArr.length()) {
 val o = fchArr.getJSONObject(i)
 fun s(k: String) = o.optString(k).let { if (it == "null") "" else it }
-val id = o.opt("id").toString().toIntOrNull() ?: continue
+val id = o.opt("id")?.toString()?.toIntOrNull() ?: continue
 val vt = s("valid_to").ifBlank { null }
 db.insert("fixed_cost_history", null, ContentValues().apply {
 put("id",          id)
 put("name",        s("name"))
-put("amount",      o.opt("amount").toString().toIntOrNull() ?: 0)
-put("category_id", o.opt("category_id").toString().toIntOrNull() ?: 0)
+put("amount",      o.opt("amount")?.toString()?.toIntOrNull() ?: 0)
+put("category_id", o.opt("category_id")?.toString()?.toIntOrNull() ?: 0)
 put("valid_from",  s("valid_from"))
 put("valid_to",    vt)
 put("created_at",  s("created_at"))
@@ -1508,22 +1689,30 @@ root.optJSONArray("input_templates")?.let { arr ->
 for (i in 0 until arr.length()) {
 val o = arr.getJSONObject(i)
 fun s(k: String) = o.optString(k).let { if (it == "null") "" else it }
-fun n(k: String) = o.opt(k).toString().toIntOrNull() ?: 0
-val id = o.opt("id").toString().toIntOrNull() ?: continue
-val et = s("entry_type").let { if (it == "INCOME") "INCOME" else "EXPENSE" }
-db.insert("input_templates", null, ContentValues().apply {
-put("id", id)
-put("title", s("title"))
-put("name", s("name"))
-put("price", n("price"))
-put("category_id", n("category_id"))
-put("tag_ids", s("tag_ids"))
-put("card_id", n("card_id"))
-put("points", n("points"))
-put("entry_type", et)
-put("sort_order", n("sort_order"))
-put("created_at", s("created_at"))
-})
+fun n(k: String) = o.opt(k)?.toString()?.toIntOrNull() ?: 0
+val id = o.opt("id")?.toString()?.toIntOrNull() ?: continue
+                    val et = s("entry_type").let { if (it == "INCOME") "INCOME" else "EXPENSE" }
+                    val tax = n("tax_rate").let { if (it == 10 || it == 8) it else 0 }
+                    val inv = if (n("invoice_flag") == 1) 1 else 0
+                    val ss = s("settlement_status").let { if (et == "EXPENSE" && it == "UNPAID") "UNPAID" else "PAID" }
+                    val due = if (ss == "UNPAID") s("due_date") else ""
+                    db.insert("input_templates", null, ContentValues().apply {
+                        put("id", id)
+                        put("title", s("title"))
+                        put("name", s("name"))
+                        put("price", n("price"))
+                        put("category_id", n("category_id"))
+                        put("tag_ids", s("tag_ids"))
+                        put("card_id", n("card_id"))
+                        put("points", n("points"))
+                        put("entry_type", et)
+                        put("tax_rate", tax)
+                        put("invoice_flag", inv)
+                        put("settlement_status", ss)
+                        put("due_date", due)
+                        put("sort_order", n("sort_order"))
+                        put("created_at", s("created_at"))
+                    })
 }
 }
 
@@ -1532,7 +1721,7 @@ root.optJSONArray("category_budgets")?.let { arr ->
 for (i in 0 until arr.length()) {
 val o = arr.getJSONObject(i)
 fun s(k: String) = o.optString(k).let { if (it == "null") "" else it }
-fun n(k: String) = o.opt(k).toString().toIntOrNull() ?: 0
+fun n(k: String) = o.opt(k)?.toString()?.toIntOrNull() ?: 0
 val pf = s("period_from")
 val cid = n("category_id")
 if (pf.isEmpty() || cid <= 0) continue
@@ -2035,55 +2224,67 @@ cardMap.values.sortedByDescending { it.getInt("totalPrice") }.forEach { result.p
 return result.toString()
 }
 
-// ----------------------------------------------------------
-//  v35: 定型入力テンプレート (input_templates)
-// ----------------------------------------------------------
-fun getInputTemplates(): String {
-val list = JSONArray()
-val cur = readableDatabase.rawQuery(
-"SELECT id, title, name, price, category_id, tag_ids, card_id, points, COALESCE(entry_type,'EXPENSE'), sort_order FROM input_templates ORDER BY sort_order ASC, id ASC",
-null
-)
-while (cur.moveToNext()) {
-list.put(JSONObject().apply {
-put("id", cur.getInt(0))
-put("title", cur.getString(1) ?: "")
-put("name", cur.getString(2) ?: "")
-put("price", cur.getInt(3))
-put("category_id", cur.getInt(4))
-put("tag_ids", cur.getString(5) ?: "")
-put("card_id", cur.getInt(6))
-put("points", cur.getInt(7))
-put("entry_type", cur.getString(8) ?: "EXPENSE")
-put("sort_order", cur.getInt(9))
-})
-}
-cur.close()
-return list.toString()
-}
+    // ----------------------------------------------------------
+    //  v35 / v36: 定型入力テンプレート (input_templates)
+    // ----------------------------------------------------------
+    fun getInputTemplates(): String {
+        val list = JSONArray()
+        val cur = readableDatabase.rawQuery(
+            "SELECT id, title, name, price, category_id, tag_ids, card_id, points, COALESCE(entry_type,'EXPENSE'), sort_order, COALESCE(tax_rate,0), COALESCE(invoice_flag,0), COALESCE(settlement_status,'PAID'), COALESCE(due_date,'') FROM input_templates ORDER BY sort_order ASC, id ASC",
+            null
+        )
+        while (cur.moveToNext()) {
+            list.put(JSONObject().apply {
+                put("id", cur.getInt(0))
+                put("title", cur.getString(1) ?: "")
+                put("name", cur.getString(2) ?: "")
+                put("price", cur.getInt(3))
+                put("category_id", cur.getInt(4))
+                put("tag_ids", cur.getString(5) ?: "")
+                put("card_id", cur.getInt(6))
+                put("points", cur.getInt(7))
+                put("entry_type", cur.getString(8) ?: "EXPENSE")
+                put("sort_order", cur.getInt(9))
+                put("tax_rate", cur.getInt(10))
+                put("invoice_flag", cur.getInt(11))
+                put("settlement_status", cur.getString(12) ?: "PAID")
+                put("due_date", cur.getString(13) ?: "")
+            })
+        }
+        cur.close()
+        return list.toString()
+    }
 
-fun saveInputTemplate(tplJson: String): Long {
-val o = JSONObject(tplJson)
-val id = o.optInt("id", -1)
-val et = o.optString("entry_type", "EXPENSE").let { if (it == "INCOME") "INCOME" else "EXPENSE" }
-val cv = ContentValues().apply {
-put("title", o.optString("title", "").ifBlank { o.optString("name", "テンプレート") })
-put("name", o.optString("name", ""))
-put("price", o.optInt("price", 0))
-put("category_id", o.optInt("category_id", 0))
-put("tag_ids", o.optString("tag_ids", ""))
-put("card_id", o.optInt("card_id", 0))
-put("points", o.optInt("points", 0))
-put("entry_type", et)
-put("sort_order", o.optInt("sort_order", 0))
-}
-return if (id > 0) {
-writableDatabase.update("input_templates", cv, "id=?", arrayOf(id.toString()))
-id.toLong()
-} else {
-writableDatabase.insert("input_templates", null, cv)
-}
-}
+    fun saveInputTemplate(tplJson: String): Long {
+        val o = JSONObject(tplJson)
+        val id = o.optInt("id", -1)
+        val et = o.optString("entry_type", "EXPENSE").let { if (it == "INCOME") "INCOME" else "EXPENSE" }
+        val tax = o.optInt("tax_rate", 0).let { if (it == 10 || it == 8) it else 0 }
+        val inv = if (o.optInt("invoice_flag", 0) == 1) 1 else 0
+        val ss = o.optString("settlement_status", "PAID").let { if (et == "EXPENSE" && it == "UNPAID") "UNPAID" else "PAID" }
+        val due = if (ss == "UNPAID") o.optString("due_date", "").trim() else ""
+        val cv = ContentValues().apply {
+            put("title", o.optString("title", "").ifBlank { o.optString("name", "テンプレート") })
+            put("name", o.optString("name", ""))
+            put("price", o.optInt("price", 0))
+            put("category_id", o.optInt("category_id", 0))
+            put("tag_ids", o.optString("tag_ids", ""))
+            put("card_id", o.optInt("card_id", 0))
+            put("points", o.optInt("points", 0))
+            put("entry_type", et)
+            put("tax_rate", tax)
+            put("invoice_flag", inv)
+            put("settlement_status", ss)
+            put("due_date", due)
+            put("sort_order", o.optInt("sort_order", 0))
+        }
+        return if (id > 0) {
+            writableDatabase.update("input_templates", cv, "id=?", arrayOf(id.toString()))
+            id.toLong()
+        } else {
+            writableDatabase.insert("input_templates", null, cv)
+        }
+    }
 
 fun deleteInputTemplate(id: Int) {
 writableDatabase.delete("input_templates", "id=?", arrayOf(id.toString()))
@@ -2255,65 +2456,400 @@ cur.close()
 return arr.toString()
 }
 
-// ----------------------------------------------------------
-//  v35: CSV エクスポート（BOM付き UTF-8）
-// ----------------------------------------------------------
-private fun escapeCsvCell(raw: String, guardFormula: Boolean = true): String {
-var v = raw
-if (guardFormula && v.isNotEmpty() && v[0] in charArrayOf('=', '+', '-', '@', '\t', '\r')) {
-v = "'$v"
-}
-return if (v.contains(',') || v.contains('"') || v.contains('\n') || v.contains('\r')) {
-"\"${v.replace("\"", "\"\"")}\""
-} else {
-v
-}
-}
+    // ----------------------------------------------------------
+    //  v36: 売上管理モード専用集計・売掛消込・年次確定申告レポート
+    // ----------------------------------------------------------
+    fun getBizCashflowByRange(dateFrom: String, dateTo: String): String {
+        val cur = readableDatabase.rawQuery("""
+            SELECT
+                COALESCE(SUM(CASE WHEN e.card_id NOT IN (SELECT id FROM cost_tags) THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id IN (SELECT id FROM cost_tags) THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id NOT IN (SELECT id FROM cost_tags) AND COALESCE(e.settlement_status,'PAID')='UNPAID' THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id NOT IN (SELECT id FROM cost_tags) AND COALESCE(e.settlement_status,'PAID')='UNPAID' THEN 1 ELSE 0 END), 0)
+            FROM expenses e
+            WHERE COALESCE(e.entry_type,'EXPENSE')='EXPENSE' AND e.date >= ? AND e.date <= ?
+        """, arrayOf(dateFrom, dateTo))
+        var grossSales = 0
+        var costTotal = 0
+        var unpaidSales = 0
+        var unpaidCount = 0
+        if (cur.moveToFirst()) {
+            grossSales = cur.getInt(0)
+            costTotal = cur.getInt(1)
+            unpaidSales = cur.getInt(2)
+            unpaidCount = cur.getInt(3)
+        }
+        cur.close()
+        return JSONObject().apply {
+            put("grossSales", grossSales)
+            put("costTotal", costTotal)
+            put("netSales", grossSales - costTotal)
+            put("unpaidSales", unpaidSales)
+            put("unpaidCount", unpaidCount)
+        }.toString()
+    }
 
-fun buildCsvString(filterJson: String = "{}"): String {
-val f = JSONObject(filterJson)
-val args = mutableListOf<String>()
-val whereStr = buildExpenseSearchWhere(f, args)
-val orderStr = buildOrderClause(f)
-val sql = """
-SELECT e.date, COALESCE(e.entry_type,'EXPENSE') as et, COALESCE(c.name,'未分類') as cat_name,
-e.price, COALESCE(e.tag_ids,''), COALESCE(e.name,''),
-COALESCE(pc.name, ct.name, '') as card_name, COALESCE(e.points,0), COALESCE(e.created_at,'')
-FROM expenses e
-LEFT JOIN categories  c  ON e.category_id = c.id
-LEFT JOIN point_cards pc ON e.card_id = pc.id
-LEFT JOIN cost_tags   ct ON e.card_id = ct.id
-$whereStr
-$orderStr
-"""
-val sb = StringBuilder()
-sb.append("日付,種別,カテゴリ,金額,タグ,メモ,カード/経費タグ,獲得ポイント,登録日時\r\n")
-val cur = readableDatabase.rawQuery(sql, args.toTypedArray())
-while (cur.moveToNext()) {
-val date = cur.getString(0) ?: ""
-val et = if (cur.getString(1) == "INCOME") "収入" else "支出"
-val cat = cur.getString(2) ?: "未分類"
-val price = cur.getInt(3).toString()
-val tags = resolveTagNames(cur.getString(4))
-val memo = cur.getString(5) ?: ""
-val card = cur.getString(6) ?: ""
-val pts = cur.getInt(7).toString()
-val created = cur.getString(8) ?: ""
-sb.append(listOf(
-escapeCsvCell(date, false),
-escapeCsvCell(et, false),
-escapeCsvCell(cat),
-price,
-escapeCsvCell(tags),
-escapeCsvCell(memo),
-escapeCsvCell(card),
-pts,
-escapeCsvCell(created, false)
-).joinToString(",")).append("\r\n")
-}
-cur.close()
-return sb.toString()
-}
+    fun getBizCalendarMonthSummary(ym: String, filterJson: String = "{}"): String {
+        val f = JSONObject(filterJson)
+        val fClean = JSONObject(f.toString()).apply { put("entryType", "EXPENSE") }
+        val extraArgs = mutableListOf<String>()
+        val extraWhereStr = buildStatsExtraWhere(fClean, extraArgs)
+        val args = mutableListOf(ym) + extraArgs
+        val cur = readableDatabase.rawQuery("""
+            SELECT e.date,
+                   COALESCE(SUM(CASE WHEN e.card_id NOT IN (SELECT id FROM cost_tags) THEN e.price ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN e.card_id IN (SELECT id FROM cost_tags) THEN e.price ELSE 0 END), 0),
+                   COUNT(e.id),
+                   COALESCE(SUM(CASE WHEN COALESCE(e.settlement_status,'PAID')='UNPAID' THEN 1 ELSE 0 END), 0)
+            FROM expenses e
+            WHERE strftime('%Y-%m', e.date) = ? $extraWhereStr
+            GROUP BY e.date
+            ORDER BY e.date ASC
+        """, args.toTypedArray())
+        val arr = JSONArray()
+        while (cur.moveToNext()) {
+            val sales = cur.getInt(1)
+            val costs = cur.getInt(2)
+            arr.put(JSONObject().apply {
+                put("date", cur.getString(0) ?: "")
+                put("sales", sales)
+                put("costs", costs)
+                put("netSales", sales - costs)
+                put("count", cur.getInt(3))
+                put("unpaidCount", cur.getInt(4))
+            })
+        }
+        cur.close()
+        return arr.toString()
+    }
+
+    fun getMemoSuggestions(prefix: String = "", limit: Int = 8): String {
+        val safeLimit = limit.coerceIn(1, 20)
+        val trimmed = prefix.trim()
+        val args = mutableListOf<String>()
+        val prefixWhere = if (trimmed.isNotEmpty()) {
+            args.add("%$trimmed%")
+            "AND name LIKE ?"
+        } else ""
+        args.add(safeLimit.toString())
+        val cur = readableDatabase.rawQuery("""
+            SELECT name, COUNT(*) as cnt, MAX(date) as last_d
+            FROM expenses
+            WHERE name IS NOT NULL AND TRIM(name) != '' $prefixWhere
+            GROUP BY name
+            ORDER BY cnt DESC, last_d DESC
+            LIMIT ?
+        """, args.toTypedArray())
+        val arr = JSONArray()
+        while (cur.moveToNext()) {
+            arr.put(JSONObject().apply {
+                put("name", cur.getString(0) ?: "")
+                put("count", cur.getInt(1))
+            })
+        }
+        cur.close()
+        return arr.toString()
+    }
+
+    fun markAsSettled(id: Int): Int {
+        val db = writableDatabase
+        val now = localNow(db)
+        return db.update(
+            "expenses",
+            ContentValues().apply {
+                put("settlement_status", "PAID")
+                put("updated_at", now)
+            },
+            "id=?",
+            arrayOf(id.toString())
+        )
+    }
+
+    fun markManyAsSettled(ids: IntArray): Int {
+        if (ids.isEmpty()) return 0
+        val db = writableDatabase
+        val now = localNow(db)
+        var updated = 0
+        db.beginTransaction()
+        try {
+            ids.forEach { id ->
+                updated += db.update(
+                    "expenses",
+                    ContentValues().apply {
+                        put("settlement_status", "PAID")
+                        put("updated_at", now)
+                    },
+                    "id=?",
+                    arrayOf(id.toString())
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return updated
+    }
+
+    fun getUnpaidSummary(): String {
+        val cur = readableDatabase.rawQuery("""
+            SELECT
+                COUNT(e.id),
+                COALESCE(SUM(e.price), 0),
+                COALESCE(SUM(CASE WHEN e.card_id NOT IN (SELECT id FROM cost_tags) THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id NOT IN (SELECT id FROM cost_tags) THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id IN (SELECT id FROM cost_tags) THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id IN (SELECT id FROM cost_tags) THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN COALESCE(e.due_date,'') != '' AND e.due_date < date('now','localtime') THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN COALESCE(e.due_date,'') != '' AND e.due_date < date('now','localtime') THEN e.price ELSE 0 END), 0)
+            FROM expenses e
+            WHERE COALESCE(e.entry_type,'EXPENSE')='EXPENSE'
+              AND COALESCE(e.settlement_status,'PAID')='UNPAID'
+        """, null)
+        var count = 0
+        var totalAmount = 0
+        var salesCount = 0
+        var salesAmount = 0
+        var costCount = 0
+        var costAmount = 0
+        var overdueCount = 0
+        var overdueAmount = 0
+        if (cur.moveToFirst()) {
+            count = cur.getInt(0)
+            totalAmount = cur.getInt(1)
+            salesCount = cur.getInt(2)
+            salesAmount = cur.getInt(3)
+            costCount = cur.getInt(4)
+            costAmount = cur.getInt(5)
+            overdueCount = cur.getInt(6)
+            overdueAmount = cur.getInt(7)
+        }
+        cur.close()
+        return JSONObject().apply {
+            put("count", count)
+            put("totalAmount", totalAmount)
+            put("salesCount", salesCount)
+            put("salesAmount", salesAmount)
+            put("costCount", costCount)
+            put("costAmount", costAmount)
+            put("overdueCount", overdueCount)
+            put("overdueAmount", overdueAmount)
+        }.toString()
+    }
+
+    fun getAnnualTaxReport(year: Int): String {
+        val db = readableDatabase
+        val yFrom = "%04d-01-01".format(year)
+        val yTo = "%04d-12-31".format(year)
+
+        val mainCur = db.rawQuery("""
+            SELECT
+                COALESCE(SUM(CASE WHEN e.card_id NOT IN (SELECT id FROM cost_tags) THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id NOT IN (SELECT id FROM cost_tags) AND COALESCE(e.settlement_status,'PAID')='PAID' THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id NOT IN (SELECT id FROM cost_tags) AND COALESCE(e.settlement_status,'PAID')='UNPAID' THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id IN (SELECT id FROM cost_tags) THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id NOT IN (SELECT id FROM cost_tags) AND COALESCE(e.tax_rate,0)=10 THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id NOT IN (SELECT id FROM cost_tags) AND COALESCE(e.tax_rate,0)=8  THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id NOT IN (SELECT id FROM cost_tags) AND COALESCE(e.tax_rate,0) NOT IN (8,10) THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id IN (SELECT id FROM cost_tags) AND COALESCE(e.tax_rate,0)=10 THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id IN (SELECT id FROM cost_tags) AND COALESCE(e.tax_rate,0)=8  THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id IN (SELECT id FROM cost_tags) AND COALESCE(e.tax_rate,0) NOT IN (8,10) THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id IN (SELECT id FROM cost_tags) AND COALESCE(e.invoice_flag,0)=1 THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id IN (SELECT id FROM cost_tags) AND COALESCE(e.invoice_flag,0)=0 THEN e.price ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN e.card_id NOT IN (SELECT id FROM cost_tags) AND COALESCE(e.invoice_flag,0)=1 THEN e.price ELSE 0 END), 0),
+                COUNT(e.id)
+            FROM expenses e
+            WHERE COALESCE(e.entry_type,'EXPENSE')='EXPENSE' AND e.date >= ? AND e.date <= ?
+        """, arrayOf(yFrom, yTo))
+
+        var grossSales = 0
+        var paidSales = 0
+        var unpaidSales = 0
+        var costTotal = 0
+        var sales10 = 0
+        var sales8 = 0
+        var sales0 = 0
+        var cost10 = 0
+        var cost8 = 0
+        var cost0 = 0
+        var invoiceCostTotal = 0
+        var nonInvoiceCostTotal = 0
+        var invoiceSalesTotal = 0
+        var recordCount = 0
+        if (mainCur.moveToFirst()) {
+            grossSales = mainCur.getInt(0)
+            paidSales = mainCur.getInt(1)
+            unpaidSales = mainCur.getInt(2)
+            costTotal = mainCur.getInt(3)
+            sales10 = mainCur.getInt(4)
+            sales8 = mainCur.getInt(5)
+            sales0 = mainCur.getInt(6)
+            cost10 = mainCur.getInt(7)
+            cost8 = mainCur.getInt(8)
+            cost0 = mainCur.getInt(9)
+            invoiceCostTotal = mainCur.getInt(10)
+            nonInvoiceCostTotal = mainCur.getInt(11)
+            invoiceSalesTotal = mainCur.getInt(12)
+            recordCount = mainCur.getInt(13)
+        }
+        mainCur.close()
+
+        // 経費タグ（勘定科目）別集計
+        val costBreakdown = JSONArray()
+        val cbCur = db.rawQuery("""
+            SELECT ct.id, ct.name, COALESCE(SUM(e.price),0) as amt, COUNT(e.id) as cnt,
+                   COALESCE(SUM(CASE WHEN COALESCE(e.invoice_flag,0)=1 THEN e.price ELSE 0 END), 0) as inv_amt
+            FROM expenses e
+            INNER JOIN cost_tags ct ON e.card_id = ct.id
+            WHERE COALESCE(e.entry_type,'EXPENSE')='EXPENSE' AND e.date >= ? AND e.date <= ?
+            GROUP BY ct.id
+            ORDER BY amt DESC
+        """, arrayOf(yFrom, yTo))
+        while (cbCur.moveToNext()) {
+            costBreakdown.put(JSONObject().apply {
+                put("tagId", cbCur.getInt(0))
+                put("tagName", cbCur.getString(1) ?: "経費")
+                put("amount", cbCur.getInt(2))
+                put("count", cbCur.getInt(3))
+                put("invoiceAmount", cbCur.getInt(4))
+            })
+        }
+        cbCur.close()
+
+        // 固定費履歴ベース年間固定費合算 (1月〜12月)
+        var fixedTotal = 0
+        for (m in 1..12) {
+            val lookupDate = "%04d-%02d-01".format(year, m)
+            val fCur = db.rawQuery("""
+                SELECT COALESCE(SUM(amount), 0) FROM fixed_cost_history
+                WHERE valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)
+            """, arrayOf(lookupDate, lookupDate))
+            if (fCur.moveToFirst()) fixedTotal += fCur.getInt(0)
+            fCur.close()
+        }
+
+        val netIncomeBeforeFixed = grossSales - costTotal
+        val netIncome = netIncomeBeforeFixed - fixedTotal
+
+        return JSONObject().apply {
+            put("year", year)
+            put("grossSales", grossSales)
+            put("paidSales", paidSales)
+            put("unpaidSales", unpaidSales)
+            put("costTotal", costTotal)
+            put("fixedTotal", fixedTotal)
+            put("netIncomeBeforeFixed", netIncomeBeforeFixed)
+            put("netIncome", netIncome)
+            put("recordCount", recordCount)
+            put("costBreakdown", costBreakdown)
+            put("taxSummary", JSONObject().apply {
+                put("sales10", sales10)
+                put("sales8", sales8)
+                put("sales0", sales0)
+                put("cost10", cost10)
+                put("cost8", cost8)
+                put("cost0", cost0)
+                put("invoiceCostTotal", invoiceCostTotal)
+                put("nonInvoiceCostTotal", nonInvoiceCostTotal)
+                put("invoiceSalesTotal", invoiceSalesTotal)
+            })
+        }.toString()
+    }
+
+    // ----------------------------------------------------------
+    //  v35 / v36: CSV エクスポート（BOM付き UTF-8）
+    // ----------------------------------------------------------
+    private fun escapeCsvCell(raw: String, guardFormula: Boolean = true): String {
+        var v = raw
+        if (guardFormula && v.isNotEmpty() && v[0] in charArrayOf('=', '+', '-', '@', '\t', '\r')) {
+            v = "'$v"
+        }
+        return if (v.contains(',') || v.contains('"') || v.contains('\n') || v.contains('\r')) {
+            "\"${v.replace("\"", "\"\"")}\""
+        } else {
+            v
+        }
+    }
+
+    fun buildCsvString(filterJson: String = "{}"): String {
+        val f = JSONObject(filterJson)
+        val isBiz = f.optBoolean("bizMode", false)
+        val args = mutableListOf<String>()
+        val whereStr = buildExpenseSearchWhere(f, args)
+        val orderStr = buildOrderClause(f)
+        val sql = """
+            SELECT e.date, COALESCE(e.entry_type,'EXPENSE') as et, COALESCE(c.name,'未分類') as cat_name,
+                   e.price, COALESCE(e.tag_ids,''), COALESCE(e.name,''),
+                   COALESCE(pc.name, ct.name, '') as card_name, COALESCE(e.points,0), COALESCE(e.created_at,''),
+                   CASE WHEN ct.id IS NOT NULL THEN 1 ELSE 0 END as is_cost_tag,
+                   COALESCE(e.tax_rate,0), COALESCE(e.invoice_flag,0),
+                   COALESCE(e.settlement_status,'PAID'), COALESCE(e.due_date,'')
+            FROM expenses e
+            LEFT JOIN categories  c  ON e.category_id = c.id
+            LEFT JOIN point_cards pc ON e.card_id = pc.id
+            LEFT JOIN cost_tags   ct ON e.card_id = ct.id
+            $whereStr
+            $orderStr
+        """
+        val sb = StringBuilder()
+        if (isBiz) {
+            sb.append("日付,種別,カテゴリ,金額,税区分,適格請求書,入金状態,入金予定日,タグ,メモ,経費タグ,登録日時\r\n")
+        } else {
+            sb.append("日付,種別,カテゴリ,金額,タグ,メモ,カード/経費タグ,獲得ポイント,登録日時\r\n")
+        }
+        val cur = readableDatabase.rawQuery(sql, args.toTypedArray())
+        while (cur.moveToNext()) {
+            val date = cur.getString(0) ?: ""
+            val rawEt = cur.getString(1) ?: "EXPENSE"
+            val cat = cur.getString(2) ?: "未分類"
+            val price = cur.getInt(3).toString()
+            val tags = resolveTagNames(cur.getString(4))
+            val memo = cur.getString(5) ?: ""
+            val card = cur.getString(6) ?: ""
+            val pts = cur.getInt(7).toString()
+            val created = cur.getString(8) ?: ""
+            val isCost = cur.getInt(9) == 1
+            if (isBiz) {
+                val etBiz = if (isCost) "経費" else "売上"
+                val taxLbl = when (cur.getInt(10)) {
+                    10 -> "10%"
+                    8 -> "8%"
+                    else -> "対象外"
+                }
+                val invLbl = if (cur.getInt(11) == 1) "適格" else ""
+                val ssLbl = if (cur.getString(12) == "UNPAID") "未入金" else "入金済"
+                val due = cur.getString(13) ?: ""
+                sb.append(listOf(
+                    escapeCsvCell(date, false),
+                    escapeCsvCell(etBiz, false),
+                    escapeCsvCell(cat),
+                    price,
+                    escapeCsvCell(taxLbl, false),
+                    escapeCsvCell(invLbl, false),
+                    escapeCsvCell(ssLbl, false),
+                    escapeCsvCell(due, false),
+                    escapeCsvCell(tags),
+                    escapeCsvCell(memo),
+                    escapeCsvCell(if (isCost) card else ""),
+                    escapeCsvCell(created, false)
+                ).joinToString(",")).append("\r\n")
+            } else {
+                val et = if (rawEt == "INCOME") "収入" else "支出"
+                sb.append(listOf(
+                    escapeCsvCell(date, false),
+                    escapeCsvCell(et, false),
+                    escapeCsvCell(cat),
+                    price,
+                    escapeCsvCell(tags),
+                    escapeCsvCell(memo),
+                    escapeCsvCell(card),
+                    pts,
+                    escapeCsvCell(created, false)
+                ).joinToString(",")).append("\r\n")
+            }
+        }
+        cur.close()
+        return sb.toString()
+    }
 
 fun exportCsvToFile(filterJson: String = "{}", accountName: String = ""): String {
 return try {
